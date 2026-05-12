@@ -1,17 +1,13 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
 
-// Load Inter font from Google Fonts
-const inter = Inter({ 
-  subsets: ["latin"],
-});
+// Initialize Inter font with Latin subset for better performance
+const inter = Inter({ subsets: ["latin"] });
 
-// FIXED: Changed 'meta Metadata' to 'metadata'
 export const metadata: Metadata = {
-  title: "JIAP-ATC Accounting System",
-  description: "Financial management system for JIAP and ATC projects designed by SLM.",
+  title: "MMP Expenses Tracker",
+  description: "Financial management system for MMP Projects",
 };
 
 export default function RootLayout({
@@ -21,12 +17,8 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${inter.className} antialiased bg-slate-50 text-slate-900`}>
-        {/* Main Content Area */}
+      <body className={inter.className}>
         {children}
-        
-        {/* Toast Notifications Container */}
-        <Toaster />
       </body>
     </html>
   );

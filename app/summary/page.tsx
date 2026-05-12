@@ -1,366 +1,167 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { LayoutDashboard, FileText, Upload, FolderKanban, Tags, PieChart, LogOut } from 'lucide-react';
+import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from '@/components/ui/badge';
-import { Download, FileText, Filter } from 'lucide-react';
-import * as XLSX from 'xlsx';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
-interface Transaction {
+interface Expense {
   id: string;
   date: string;
   project_id: string;
-  category: string; // Company Name for SCA
-  sub_category?: string; // 'SCA' tag
+  project_name?: string;
+  category: string;
   description: string;
-  amount: number; // Gross Amount
-  status: string;
+  amount: number;
+}
+
+interface Project {
+  id: string;
+  name: string;
 }
 
 export default function SummaryPage() {
-  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
-  const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
-  
-  // Filter States
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
-  
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+
   const supabase = createClient();
 
-  // ULTRA-ROBUST Helper to extract SCA details from description string
-  const extractSCADetails = (desc: string) => {
-      const start = desc.indexOf('[');
-      const end = desc.lastIndexOf(']');
-      if (start === -1 || end === -1 || end <= start) {
-          return { paid: 0, balance: 0, note: '', invoices: [] };
-      }
-      
-      const details = desc.substring(start + 1, end);
-      const parts = details.split('|');
-      let paid = 0, balance = 0, note = '';
-      let invoices: number[] = [];
-      
-      parts.forEach(part => {
-          if (part.startsWith('PAID:')) paid = parseFloat(part.replace('PAID:', '').replace(/,/g, '')) || 0;
-          else if (part.startsWith('BAL:')) balance = parseFloat(part.replace('BAL:', '').replace(/,/g, '')) || 0;
-          else if (part.startsWith('NOTE:')) note = part.replace('NOTE:', '').trim();
-          else if (part.startsWith('INVS:[')) {
-              const invContent = part.substring(6, part.length - 1);
-              if (invContent) {
-                  invoices = invContent.split(',').map(v => {
-                      const num = parseFloat(v.trim().replace(/[^0-9.-]/g, ''));
-                      return isNaN(num) ? 0 : num;
-                  }).filter(n => n !== 0);
-              }
-          }
-      });
-      
-      return { paid, balance, note, invoices };
-  };
+  // Fetch Data
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-  const fetchTransactions = async () => {
+  const fetchData = async () => {
     setLoading(true);
-    // Fetch ALL expenses initially
-    const { data, error } = await supabase.from('expenses').select('*').order('date', { ascending: false });
     
-    if (!error && data) {
-        setAllTransactions(data as Transaction[]);
-        setFilteredTransactions(data as Transaction[]); // Initially show all
+    // Fetch Projects
+    const { data: projData } = await supabase.from('projects').select('id, name');
+    if (projData) setProjects(projData);
+
+    // Fetch Expenses with Project Names
+    const { data: expData, error } = await supabase
+      .from('expenses')
+      .select(`
+        *,
+        projects (name)
+      `)
+      .order('date', { ascending: false });
+
+    if (!error && expData) {
+      const formattedExpenses = expData.map((exp: any) => ({
+        ...exp,
+        project_name: exp.projects?.name || 'Unknown Project'
+      }));
+      setExpenses(formattedExpenses);
     }
     setLoading(false);
   };
 
-  useEffect(() => { 
-      fetchTransactions(); 
-  }, []); 
-
-  // Apply Filters whenever dates change
-  useEffect(() => {
-      let result = allTransactions;
-
-      if (fromDate) {
-          result = result.filter(t => t.date >= fromDate);
-      }
-      if (toDate) {
-          result = result.filter(t => t.date <= toDate);
-      }
-
-      setFilteredTransactions(result);
-  }, [fromDate, toDate, allTransactions]);
-
-  // --- EXPORT FUNCTIONS (Export Filtered Data) ---
-
-  const handleExportToExcel = () => {
-    const exportData = filteredTransactions.map(t => ({
-      Date: t.date,
-      Project: t.project_id,
-      Category: t.category,
-      Description: t.description,
-      Amount: t.amount,
-    }));
-    const ws = XLSX.utils.json_to_sheet(exportData);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Summary");
-    XLSX.writeFile(wb, `Summary_Export_${fromDate || 'All'}_to_${toDate || 'All'}.xlsx`);
-  };
-
-  const handleExportToPDF = () => {
-    const doc = new jsPDF();
-    doc.text("Financial Summary Report", 14, 15);
-    doc.setFontSize(10);
-    const period = fromDate && toDate ? `Period: ${fromDate} to ${toDate}` : "Period: All Time";
-    doc.text(period, 14, 22);
-
-    // Prepare data for PDF
-    const tableColumn = ["Date", "Project", "Category", "Description", "Amount"];
-    const tableRows = filteredTransactions.map(t => [
-        t.date,
-        t.project_id,
-        t.category,
-        t.description.length > 40 ? t.description.substring(0, 40) + '...' : t.description,
-        t.amount.toLocaleString()
-    ]);
-
-    autoTable(doc, {
-        head: [tableColumn],
-        body: tableRows,
-        startY: 30,
-        theme: 'grid',
-        styles: { fontSize: 8 },
-        headStyles: { fillColor: [41, 128, 185] }
+  // Calculate Category Summary
+  const categorySummary = useMemo(() => {
+    const summary: Record<string, number> = {};
+    expenses.forEach(exp => {
+      summary[exp.category] = (summary[exp.category] || 0) + exp.amount;
     });
+    return Object.entries(summary)
+      .map(([category, total]) => ({ category, total }))
+      .sort((a, b) => b.total - a.total);
+  }, [expenses]);
 
-    doc.save(`Summary_Report_${new Date().toISOString().split('T')[0]}.pdf`);
-  };
+  // Calculate Project Summary
+  const projectSummary = useMemo(() => {
+    const summary: Record<string, number> = {};
+    expenses.forEach(exp => {
+      summary[exp.project_name || 'Unknown'] = (summary[exp.project_name || 'Unknown'] || 0) + exp.amount;
+    });
+    return Object.entries(summary)
+      .map(([project, total]) => ({ project, total }))
+      .sort((a, b) => b.total - a.total);
+  }, [expenses]);
 
-  // Calculate Totals for Standard Categories (Filtered)
-  const categoryTotals = filteredTransactions
-    .filter(t => t.sub_category !== 'SCA')
-    .reduce((acc, curr) => {
-      acc[curr.category] = (acc[curr.category] || 0) + curr.amount;
-      return acc;
-    }, {} as Record<string, number>);
-
-  // Calculate Totals for Projects (Filtered)
-  const projectTotals = filteredTransactions
-    .filter(t => t.sub_category !== 'SCA')
-    .reduce((acc, curr) => {
-      acc[curr.project_id] = (acc[curr.project_id] || 0) + curr.amount;
-      return acc;
-    }, {} as Record<string, number>);
-
-  // Filter SCA Transactions (Filtered)
-  const scaTransactions = filteredTransactions.filter(t => t.sub_category === 'SCA');
-
-  // Calculate Grand Totals for SCA (Filtered)
-  const scaGrandGross = scaTransactions.reduce((sum, t) => sum + t.amount, 0);
-  const scaGrandPaid = scaTransactions.reduce((sum, t) => {
-      const details = extractSCADetails(t.description);
-      return sum + details.invoices.reduce((a, b) => a + b, 0);
-  }, 0);
-  const scaGrandBalance = scaTransactions.reduce((sum, t) => {
-      const details = extractSCADetails(t.description);
-      return sum + details.balance;
-  }, 0);
-
-  // Add SCA Payments to Category Totals for Display
-  const displayCategoryTotals = { ...categoryTotals };
-  if (scaGrandPaid > 0) {
-      displayCategoryTotals['SCA Payments'] = scaGrandPaid;
-  }
+  // Calculate Grand Total
+  const grandTotal = useMemo(() => {
+    return expenses.reduce((sum, exp) => sum + exp.amount, 0);
+  }, [expenses]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center flex-wrap gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">Summary Reports</h1>
-          <p className="text-sm text-muted-foreground">Overview of expenses and SCA payment status.</p>
+    <div className="flex min-h-screen bg-slate-50">
+      {/* Sidebar */}
+      <aside className="w-64 bg-white border-r hidden md:block fixed h-full z-10 shadow-sm">
+        <div className="p-6 border-b flex items-center gap-2">
+           <PieChart className="h-6 w-6 text-blue-600" />
+           <h1 className="text-xl font-bold text-slate-800">MMP Expenses</h1>
         </div>
-        
-        {/* DATE FILTERS */}
-        <div className="flex items-end gap-2 bg-slate-50 p-2 rounded-lg border">
-            <div className="grid gap-1">
-                <Label htmlFor="from" className="text-xs">From Date</Label>
-                <Input id="from" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} className="h-8 w-[140px]" />
-            </div>
-            <div className="grid gap-1">
-                <Label htmlFor="to" className="text-xs">To Date</Label>
-                <Input id="to" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} className="h-8 w-[140px]" />
-            </div>
-            <Button variant="ghost" size="sm" onClick={() => { setFromDate(''); setToDate(''); }} className="h-8">
-                Reset
-            </Button>
+        <nav className="p-4 space-y-2">
+          <Link href="/dashboard" className="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><LayoutDashboard className="h-4 w-4" /> Dashboard</Link>
+          <Link href="/reports" className="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><FileText className="h-4 w-4" /> Expenses</Link>
+          <Link href="/upload" className="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><Upload className="h-4 w-4" /> Upload Excel</Link>
+          <Link href="/projects" className="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><FolderKanban className="h-4 w-4" /> Projects</Link>
+          <Link href="/categories" className="flex items-center gap-3 px-4 py-2 text-slate-600 hover:bg-slate-50 rounded-lg transition-colors"><Tags className="h-4 w-4" /> Categories</Link>
+          <Link href="/summary" className="flex items-center gap-3 px-4 py-2 bg-blue-50 text-blue-700 rounded-lg font-medium transition-colors"><PieChart className="h-4 w-4" /> Summary Report</Link>
+        </nav>
+        <div className="absolute bottom-4 left-4 right-4">
+           <Button variant="outline" className="w-full justify-start gap-2 hover:bg-red-50 hover:text-red-600" onClick={() => supabase.auth.signOut()}><LogOut className="h-4 w-4" /> Logout</Button>
+        </div>
+      </aside>
+
+      <main className="flex-1 md:ml-64 p-8">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-slate-900">Summary Report</h1>
+          <p className="text-slate-500">Overview of expenses by category and project.</p>
         </div>
 
-        <div className="flex gap-2">
-            <Button variant="outline" onClick={handleExportToExcel}>
-                <Download className="mr-2 h-4 w-4" /> Excel
-            </Button>
-            <Button variant="outline" onClick={handleExportToPDF}>
-                <FileText className="mr-2 h-4 w-4" /> PDF
-            </Button>
-        </div>
-      </div>
+        {loading ? (
+          <Card className="shadow-sm mb-6">
+            <CardContent className="pt-6 text-center py-10 text-slate-500">Loading summary data...</CardContent>
+          </Card>
+        ) : (
+          <>
+            {/* Grand Total Card */}
+            <Card className="shadow-sm mb-6 border-l-4 border-blue-600">
+              <CardHeader>
+                <CardTitle className="text-slate-500 text-sm font-medium">Grand Total Expenses</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-3xl font-bold text-slate-900">{grandTotal.toLocaleString()} PKR</div>
+              </CardContent>
+            </Card>
 
-      <Tabs defaultValue="standard" className="w-full">
-        <TabsList className="grid w-full grid-cols-2">
-          <TabsTrigger value="standard">Standard Summary</TabsTrigger>
-          <TabsTrigger value="sca">SCA Status</TabsTrigger>
-        </TabsList>
-
-        {/* TAB 1: STANDARD SUMMARY */}
-        <TabsContent value="standard">
-            <div className="grid gap-6 md:grid-cols-2">
-                <Card>
-                    <CardHeader><CardTitle>Category-wise Totals</CardTitle></CardHeader>
-                    <CardContent>
-                        <div className="max-h-[400px] overflow-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Category</TableHead>
-                                        <TableHead className="text-right">Total Amount</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {loading ? (
-                                        <TableRow><TableCell colSpan={2} className="text-center py-8">Loading...</TableCell></TableRow>
-                                    ) : Object.keys(displayCategoryTotals).length > 0 ? (
-                                        Object.entries(displayCategoryTotals)
-                                            .sort(([,a], [,b]) => b - a)
-                                            .map(([catName, amount]) => (
-                                                <TableRow key={catName}>
-                                                    <TableCell>{catName}</TableCell>
-                                                    <TableCell className="text-right font-mono">{amount.toLocaleString()}</TableCell>
-                                                </TableRow>
-                                            ))
-                                    ) : (
-                                        <TableRow><TableCell colSpan={2} className="text-center py-8 text-muted-foreground">No data found for selected period.</TableCell></TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader><CardTitle>Project-wise Totals</CardTitle></CardHeader>
-                    <CardContent>
-                        <div className="max-h-[400px] overflow-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Project</TableHead>
-                                        <TableHead className="text-right">Total Amount</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {loading ? (
-                                        <TableRow><TableCell colSpan={2} className="text-center py-8">Loading...</TableCell></TableRow>
-                                    ) : Object.keys(projectTotals).length > 0 ? (
-                                        Object.entries(projectTotals)
-                                            .sort(([,a], [,b]) => b - a)
-                                            .map(([pName, amount]) => (
-                                                <TableRow key={pName}>
-                                                    <TableCell><Badge variant="outline">{pName}</Badge></TableCell>
-                                                    <TableCell className="text-right font-mono">{amount.toLocaleString()}</TableCell>
-                                                </TableRow>
-                                            ))
-                                    ) : (
-                                        <TableRow><TableCell colSpan={2} className="text-center py-8 text-muted-foreground">No data found for selected period.</TableCell></TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-                    </CardContent>
-                </Card>
-            </div>
-        </TabsContent>
-
-        {/* TAB 2: SCA STATUS */}
-        <TabsContent value="sca">
-          <Card>
-            <CardHeader>
-                <CardTitle>SCA Payment Status</CardTitle>
-                <p className="text-sm text-muted-foreground">Tracking Gross, Paid, and Remaining Balance for Sub-Consultancies.</p>
-            </CardHeader>
-            <CardContent className="overflow-x-auto">
-                <Table>
+            <div className="grid md:grid-cols-2 gap-6">
+              {/* Category Summary */}
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle>Category Wise Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
                     <TableHeader>
-                        <TableRow>
-                            <TableHead>Project</TableHead>
-                            <TableHead>Company (Category)</TableHead>
-                            <TableHead>Description</TableHead>
-                            <TableHead className="text-right">Total Gross</TableHead>
-                            <TableHead className="text-right">Inv 1</TableHead>
-                            <TableHead className="text-right">Inv 2</TableHead>
-                            <TableHead className="text-right">Inv 3</TableHead>
-                            <TableHead className="text-right">Inv 4</TableHead>
-                            <TableHead className="text-right">Total Paid</TableHead>
-                            <TableHead className="text-right">Remaining Balance</TableHead>
-                            <TableHead>Comments</TableHead>
-                        </TableRow>
+                      <TableRow>
+                        <TableHead>Category</TableHead>
+                        <TableHead className="text-right">Total Amount</TableHead>
+                      </TableRow>
                     </TableHeader>
                     <TableBody>
-                        {loading ? (
-                            <TableRow><TableCell colSpan={11} className="text-center py-8">Loading...</TableCell></TableRow>
-                        ) : scaTransactions.length > 0 ? (
-                            scaTransactions.map((t) => {
-                                const { paid, balance, note, invoices } = extractSCADetails(t.description);
-                                const totalPaidFromInvs = invoices.reduce((a, b) => a + b, 0);
-                                
-                                return (
-                                    <TableRow key={t.id}>
-                                        <TableCell><Badge variant="outline">{t.project_id}</Badge></TableCell>
-                                        <TableCell className="font-medium">{t.category}</TableCell>
-                                        <TableCell className="max-w-xs truncate">{t.description.split('[')[0]}</TableCell>
-                                        <TableCell className="text-right font-mono">{t.amount.toLocaleString()}</TableCell>
-                                        
-                                        <TableCell className="text-right font-mono text-xs">{invoices[0] ? invoices[0].toLocaleString() : '-'}</TableCell>
-                                        <TableCell className="text-right font-mono text-xs">{invoices[1] ? invoices[1].toLocaleString() : '-'}</TableCell>
-                                        <TableCell className="text-right font-mono text-xs">{invoices[2] ? invoices[2].toLocaleString() : '-'}</TableCell>
-                                        <TableCell className="text-right font-mono text-xs">{invoices[3] ? invoices[3].toLocaleString() : '-'}</TableCell>
-                                        
-                                        <TableCell className="text-right font-mono text-green-600 font-bold">{totalPaidFromInvs.toLocaleString()}</TableCell>
-                                        <TableCell className="text-right font-mono text-red-600 font-bold">{balance.toLocaleString()}</TableCell>
-                                        <TableCell className="text-xs text-muted-foreground max-w-[150px] truncate" title={note}>{note}</TableCell>
-                                    </TableRow>
-                                );
-                            })
-                        ) : (
-                            <TableRow><TableCell colSpan={11} className="text-center py-8 text-muted-foreground">No SCA records found for selected period.</TableCell></TableRow>
-                        )}
+                      {categorySummary.length === 0 ? (
+                         <TableRow><TableCell colSpan={2} className="text-center py-4 text-slate-500">No data available.</TableCell></TableRow>
+                      ) : (
+                        categorySummary.map((item, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell className="font-medium">{item.category}</TableCell>
+                            <TableCell className="text-right font-mono">{item.total.toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
                     </TableBody>
-                    {scaTransactions.length > 0 && (
-                        <tfoot>
-                            <TableRow className="bg-slate-50 font-bold border-t-2">
-                                <TableCell colSpan={3}>Grand Total</TableCell>
-                                <TableCell className="text-right">{scaGrandGross.toLocaleString()}</TableCell>
-                                <TableCell className="text-right">-</TableCell>
-                                <TableCell className="text-right">-</TableCell>
-                                <TableCell className="text-right">-</TableCell>
-                                <TableCell className="text-right">-</TableCell>
-                                <TableCell className="text-right text-green-700">{scaGrandPaid.toLocaleString()}</TableCell>
-                                <TableCell className="text-right text-red-700">{scaGrandBalance.toLocaleString()}</TableCell>
-                                <TableCell></TableCell>
-                            </TableRow>
-                        </tfoot>
-                    )}
-                </Table>
-            </CardContent>
-          </Card>
-        </TabsContent>
+                  </Table>
+                </CardContent>
+              </Card>
 
-      </Tabs>
-    </div>
-  );
-}
+              {/* Project Summary */}
+              <Card className="shadow-sm">
+                <CardHeader>
+                  <CardTitle>Project Wise Summary</CardTitle
