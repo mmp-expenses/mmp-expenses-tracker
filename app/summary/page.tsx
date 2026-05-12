@@ -164,4 +164,35 @@ export default function SummaryPage() {
               {/* Project Summary */}
               <Card className="shadow-sm">
                 <CardHeader>
-                  <CardTitle>Project Wise Summary</CardTitle
+                  <CardTitle>Project Wise Summary</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Project</TableHead>
+                        <TableHead className="text-right">Total Amount</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {projectSummary.length === 0 ? (
+                         <TableRow><TableCell colSpan={2} className="text-center py-4 text-slate-500">No data available.</TableCell></TableRow>
+                      ) : (
+                        projectSummary.map((item, idx) => (
+                          <TableRow key={idx}>
+                            <TableCell className="font-medium">{item.project}</TableCell>
+                            <TableCell className="text-right font-mono">{item.total.toLocaleString()}</TableCell>
+                          </TableRow>
+                        ))
+                      )}
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
