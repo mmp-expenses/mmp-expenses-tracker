@@ -6,10 +6,10 @@
       "static/css/app/layout.css",
       "static/chunks/app/layout.js"
     ],
-    "/page": [
+    "/login/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
-      "static/chunks/app/page.js"
+      "static/chunks/app/login/page.js"
     ],
     "/dashboard/layout": [
       "static/chunks/webpack.js",
@@ -41,15 +41,15 @@
       "static/chunks/main-app.js",
       "static/chunks/app/categories/page.js"
     ],
-    "/summary/page": [
-      "static/chunks/webpack.js",
-      "static/chunks/main-app.js",
-      "static/chunks/app/summary/page.js"
-    ],
     "/reports/page": [
       "static/chunks/webpack.js",
       "static/chunks/main-app.js",
       "static/chunks/app/reports/page.js"
+    ],
+    "/summary/page": [
+      "static/chunks/webpack.js",
+      "static/chunks/main-app.js",
+      "static/chunks/app/summary/page.js"
     ]
   }
 }
